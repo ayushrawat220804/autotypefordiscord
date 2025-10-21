@@ -52,6 +52,17 @@ Use the "Dry Run" toggle in the GUI
 
 CHANGELOG:
 ==========
+v1.1 (Latest):
+- Reduced meme/utility command frequency to 20% total (more natural)
+- Reduced "owo owo" action command frequency to 8% (less spammy)
+- Improved command distribution: 80% core, 20% special (meme+utility+action)
+- Enhanced statistics dashboard with visual bars and detailed metrics
+- Window now maximizes on startup for better visibility
+- WPM slider now shows integer values only (no decimals)
+- Improved help section with detailed mode explanations
+- Better documentation of command frequencies and distributions
+
+v1.0:
 - Merged EnhancedOwoAutoTyper and SimpleOwoAutoTyper
 - Fixed thread safety issues (proper event handling, join on shutdown)
 - Fixed keyboard hotkey leaks (proper cleanup on exit)
@@ -154,7 +165,14 @@ class GodOwoBotApp:
         """
         self.root = root
         self.root.title("God OwO Discord Bot - Production Ready")
-        self.root.geometry("1100x800")
+        # Maximize window on startup
+        try:
+            self.root.state('zoomed')  # Windows
+        except:
+            try:
+                self.root.attributes('-zoomed', True)  # Linux
+            except:
+                self.root.geometry("1200x900")  # Fallback
         
         # Ensure config directory exists
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -400,15 +418,20 @@ class GodOwoBotApp:
         ttk.Separator(advanced_frame, orient='horizontal').pack(fill='x', pady=10)
         
         ttk.Label(advanced_frame, text="Typing Speed (WPM):").pack(anchor=tk.W)
-        ttk.Scale(
+        wpm_scale = ttk.Scale(
             advanced_frame,
             from_=50,
             to=200,
             variable=self.typing_wpm,
             orient=tk.HORIZONTAL,
-            length=200
-        ).pack(anchor=tk.W)
-        ttk.Label(advanced_frame, textvariable=self.typing_wpm, font=("Arial", 8)).pack(anchor=tk.W)
+            length=200,
+            command=lambda v: self.typing_wpm.set(int(float(v)))
+        )
+        wpm_scale.pack(anchor=tk.W)
+        self.wpm_label = ttk.Label(advanced_frame, text=f"{self.typing_wpm.get()} WPM", font=("Arial", 8))
+        self.wpm_label.pack(anchor=tk.W)
+        # Update label when WPM changes
+        self.typing_wpm.trace_add('write', lambda *args: self.wpm_label.config(text=f"{self.typing_wpm.get()} WPM"))
         
         ttk.Label(advanced_frame, text="Target User (for give/clover/cookie):").pack(anchor=tk.W, pady=(10, 0))
         ttk.Entry(advanced_frame, textvariable=self.target_user, width=20).pack(anchor=tk.W)
@@ -556,13 +579,42 @@ MODES:
    • Perfect for quick, safe automation
 
 2. ADVANCED MODE (Configurable)
-   • Fully customizable command sets
-   • Ultra Mode: Adds 22+ action commands
-   • Meme Mode: Adds 11 meme generation commands
-   • Utility Mode: Adds utility commands (ping, stats, rules, etc.)
-   • Random prefix mode (owo/o)
-   • Configurable typing speed (WPM)
-   • Target user for give/clover/cookie
+   
+   Core Commands (always active):
+   • hunt, coinflip, slots, battle, cash, zoo, pray
+   • sell all, daily, vote, quest
+   
+   Optional Modes:
+   
+   ⚡ ULTRA ADVANCED MODE (Action Commands)
+   • Adds "owo owo" action commands: cuddle, hug, kiss, lick, pat, poke, slap, bite
+   • Frequency: ~8% of total commands (reduced for natural behavior)
+   • These are double-prefix commands (owo owo [action])
+   
+   🎭 MEME MODE (Meme Generation)
+   • Adds meme commands: drake, headpat, slapcar (with target user)
+   • Frequency: ~12% of total commands
+   • Uses configured target user (default: @owo)
+   
+   🛠️ UTILITY MODE
+   • Adds utility commands: ping, stats, rules
+   • Frequency: ~12% of total commands
+   • Useful for checking bot status and server info
+   
+   🎲 RANDOM PREFIXES
+   • When enabled, randomly switches between "owo" and "o" prefix
+   • Makes automation less detectable
+   • Example: "owo hunt" becomes "o hunt" randomly
+   
+   ⚙️ Other Settings:
+   • Base interval: Time between command cycles (min 5s)
+   • Typing speed: 50-200 WPM (words per minute)
+   • Target user: Username for give/clover/cookie/meme commands
+   
+   📊 Command Distribution:
+   • 80% core/optional commands (hunt, battle, coinflip, etc.)
+   • 20% special commands (meme + utility + action combined)
+   • This keeps the bot looking natural and avoids spam
 
 FEATURES:
 ---------
@@ -934,7 +986,7 @@ Note: 'keyboard' requires admin/root on some systems.
             "owo quest"
         ]
         
-        # Ultra advanced: action commands
+        # Ultra advanced: action commands (owo owo)
         action_commands = [
             "owo owo cuddle", "owo owo hug", "owo owo kiss", "owo owo lick",
             "owo owo pat", "owo owo poke", "owo owo slap", "owo owo bite"
@@ -952,7 +1004,8 @@ Note: 'keyboard' requires admin/root on some systems.
             "owo ping", "owo stats", "owo rules"
         ] if self.var_utility_mode.get() else []
         
-        all_commands = core_commands + optional_commands + action_commands + meme_commands + utility_commands
+        # Main command pool (core + optional)
+        main_commands = core_commands + optional_commands
         
         try:
             # Initial countdown
@@ -972,8 +1025,27 @@ Note: 'keyboard' requires admin/root on some systems.
                     break
                 
                 # Pick commands for this iteration
-                num_commands = rng.randint(3, 6)
-                commands_to_run = rng.sample(all_commands, min(num_commands, len(all_commands)))
+                # Strategy: Pick 3-5 commands from core/optional, then add 0-1 special command with 20% total chance
+                num_main_commands = rng.randint(3, 5)
+                commands_to_run = rng.sample(main_commands, min(num_main_commands, len(main_commands)))
+                
+                # 20% chance to add ONE special command (meme/utility/action)
+                # This ensures meme+utility+action combined are max ~20% of total commands
+                if rng.random() < 0.20:
+                    special_pool = []
+                    # Action commands: only 8% chance (less frequent)
+                    if action_commands and rng.random() < 0.08:
+                        special_pool.extend(action_commands)
+                    # Meme commands: 12% chance
+                    if meme_commands and rng.random() < 0.12:
+                        special_pool.extend(meme_commands)
+                    # Utility commands: 12% chance
+                    if utility_commands and rng.random() < 0.12:
+                        special_pool.extend(utility_commands)
+                    
+                    if special_pool:
+                        special_cmd = rng.choice(special_pool)
+                        commands_to_run.append(special_cmd)
                 
                 for cmd_base in commands_to_run:
                     if self._stop_event.is_set() or self._pause_event.is_set():
@@ -1189,23 +1261,50 @@ Note: 'keyboard' requires admin/root on some systems.
         
         hours = self.stats.total_runtime // 3600
         minutes = (self.stats.total_runtime % 3600) // 60
+        seconds = self.stats.total_runtime % 60
+        
+        # Calculate commands per hour if we have runtime
+        commands_per_hour = 0
+        if self.stats.total_runtime > 0:
+            commands_per_hour = int((self.stats.commands_sent / self.stats.total_runtime) * 3600)
+        
+        # Calculate average commands per session
+        avg_per_session = 0
+        if self.stats.sessions > 0:
+            avg_per_session = self.stats.commands_sent // self.stats.sessions
         
         stats_content = f"""
-📊 STATISTICS DASHBOARD
-{'=' * 60}
+╔════════════════════════════════════════════════════════════════╗
+║                    📊 STATISTICS DASHBOARD                     ║
+╚════════════════════════════════════════════════════════════════╝
 
-Total Commands Sent:     {self.stats.commands_sent}
-Total Runtime:           {hours}h {minutes}m
-Total Sessions:          {self.stats.sessions}
-Errors Encountered:      {self.stats.errors}
-Last Run:                {self.stats.last_run or 'Never'}
+📈 OVERALL METRICS
+{'─' * 64}
+Total Commands Sent:         {self.stats.commands_sent:,}
+Total Runtime:               {hours}h {minutes}m {seconds}s
+Total Sessions:              {self.stats.sessions}
+Average Commands/Session:    {avg_per_session}
+Commands Per Hour:           {commands_per_hour:,}
+Errors Encountered:          {self.stats.errors}
+Success Rate:                {((self.stats.commands_sent / max(1, self.stats.commands_sent + self.stats.errors)) * 100):.1f}%
+Last Run:                    {self.stats.last_run or 'Never'}
 
-Commands by Type:
-{'-' * 60}
+📊 COMMANDS BY MODE
+{'─' * 64}
 """
         
-        for cmd_type, count in sorted(self.stats.commands_by_type.items(), key=lambda x: x[1], reverse=True):
-            stats_content += f"  {cmd_type:20s}: {count}\n"
+        # Group by mode
+        if self.stats.commands_by_type:
+            for cmd_type, count in sorted(self.stats.commands_by_type.items(), key=lambda x: x[1], reverse=True):
+                percentage = (count / max(1, self.stats.commands_sent)) * 100
+                bar_length = int(percentage / 2)  # Scale to 50 chars max
+                bar = '█' * bar_length + '░' * (50 - bar_length)
+                stats_content += f"{cmd_type:12s} │ {count:6,} │ {percentage:5.1f}% │ {bar}\n"
+        else:
+            stats_content += "  No commands sent yet.\n"
+        
+        stats_content += f"\n{'─' * 64}\n"
+        stats_content += f"💡 TIP: Keep the bot running longer to see detailed statistics!\n"
         
         self.stats_text.insert('1.0', stats_content)
     
