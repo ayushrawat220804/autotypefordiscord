@@ -59,7 +59,7 @@ class AutoTypeDiscord:
         ttk.Label(settings_frame, text="Content:").grid(row=1, column=0, sticky=tk.W, pady=(10, 0))
         self.content_var = tk.StringVar(value="sample")
         content_combo = ttk.Combobox(settings_frame, textvariable=self.content_var, 
-                                   values=["sample", "cross_talk", "generated_1k", "generated_10k"], state="readonly")
+                                   values=["sample", "cross_talk", "generated_1k", "generated_10k", "generated_25k"], state="readonly")
         content_combo.grid(row=1, column=1, padx=(10, 0), pady=(10, 0))
         
         # Control buttons frame
@@ -142,11 +142,15 @@ class AutoTypeDiscord:
         # Generate 10k word passage
         generated_10k = self.generate_10000_word_passage()
         
+        # Generate 25k word passage
+        generated_25k = self.generate_25000_word_passage()
+        
         return {
             "sample": sample_paragraphs,
             "cross_talk": cross_talk,
             "generated_1k": [generated_1k],
-            "generated_10k": [generated_10k]
+            "generated_10k": [generated_10k],
+            "generated_25k": [generated_25k]
         }
     
     def generate_1000_word_paragraph(self):

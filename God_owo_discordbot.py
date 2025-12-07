@@ -190,27 +190,78 @@ class GodOwoBotApp:
         self._is_paused = False
         self.worker: Optional[threading.Thread] = None
         self.current_mode: str = "none"  # "simple", "advanced", or "none"
+        self._browser_stop_event = threading.Event()
         
         # Statistics
         self.stats = BotStats()
         self._load_statistics()
         
-        # UI Variables - Simple Mode
-        self.simple_interval = tk.IntVar(value=15)
-        
         # UI Variables - Advanced Mode
         self.advanced_interval = tk.IntVar(value=10)
+        self.refresh_interval = tk.IntVar(value=10)  # Default 10 minutes for refresh (Ctrl+R)
+        self.restart_interval = tk.IntVar(value=30)  # Default 30 minutes for restart (Alt+F4)
+        self.var_auto_refresh = tk.BooleanVar(value=True)
+        self.var_auto_restart = tk.BooleanVar(value=True)
         self.var_dry_run = tk.BooleanVar(value=False)
+        self.target_url = tk.StringVar(value="https://discord.com/channels/1432319524606054422/1434581841037492377")
         self.var_ultra_mode = tk.BooleanVar(value=False)
         self.var_meme_mode = tk.BooleanVar(value=False)
         self.var_utility_mode = tk.BooleanVar(value=False)
         self.var_advanced_prefix = tk.BooleanVar(value=False)
         self.var_owo_only = tk.BooleanVar(value=False)
+        self.var_enable_sell_all = tk.BooleanVar(value=True)  # Toggle for sell all
+        self.var_enable_random_text = tk.BooleanVar(value=True)  # Enable random text
         self.typing_wpm = tk.IntVar(value=120)
         self.target_user = tk.StringVar(value="@owo")
         
         # Command tracking for uniqueness
         self.previous_amounts: Dict[str, int] = {}
+        
+        # Command timing tracking (for cooldowns)
+        self.command_last_used: Dict[str, float] = {}
+        
+        # Gem usage tracking
+        self.var_auto_use_gems = tk.BooleanVar(value=False)
+        self.gem_hunt_count = 0  # Track hunts since last gem use
+        self.gems_to_use = []  # List of gem IDs to use
+        self.last_gem_use_time = 0.0
+        self.gem_ids_var = tk.StringVar(value="51 65 72")
+        self.gem_hunt_interval = tk.IntVar(value=0)
+        self.gem_use_threshold = tk.IntVar(value=0)  # Threshold for gem usage
+        
+        # Random text sentences pool (expanded with longer sentences)
+        self.random_texts = [
+            # Short casual phrases
+            "lol", "haha", "nice", "cool", "yeah", "ok", "sure", "maybe", "idk", "lmao",
+            "xd", "wtf", "bruh", "fr", "ngl", "tbh", "same", "mood", "facts", "true",
+            "yep", "nope", "nah", "okay", "lol i", "kux bi hora h",
+            
+            # 2-3 word phrases
+            "that's funny", "makes sense", "got it", "sounds good", "fair enough",
+            "nice one", "good stuff", "no way", "for real", "wait what",
+            "i guess", "could be", "might be", "that's cool", "that's wild",
+            
+            # 4-5 word sentences (more natural)
+            "lol i don't know", "xd that's so funny", "wtf is going on",
+            "bruh that's crazy", "fr that makes sense", "ngl that's pretty cool",
+            "tbh i think so", "same here bro", "mood right now",
+            "facts that's true", "yep sounds good", "nope not really",
+            "lol i see", "xd wtf happened", "bruh for real",
+            "that's actually pretty cool", "i don't know man", "that makes sense to me",
+            "wait what just happened", "i guess that works", "could be better though",
+            "might be worth trying", "that's pretty interesting", "sounds like a plan",
+            "fair enough i guess", "nice one there", "good stuff keep going",
+            "no way that's crazy", "for real though", "wait what did you say",
+            "i see what you mean", "that's cool i guess", "makes sense to me",
+            "got it thanks", "alright sounds good", "yeah that works",
+            "ok i understand", "sure why not", "maybe next time",
+            "idk about that", "lmao that's hilarious", "haha nice one",
+            "omg that's amazing", "wow that's cool", "interesting point there",
+            "probably should do that", "possibly could work", "that's wild man",
+            "crazy how that works", "insane amount of stuff", "wow amazing job",
+            "incredible work there", "awesome stuff happening", "sweet deal bro",
+            "rad idea man", "seriously that's cool", "huh didn't know that"
+        ]
         
         # Build UI
         self._build_ui()
@@ -344,197 +395,142 @@ class GodOwoBotApp:
         )
         warning_label.pack(fill='x')
         
-        # Left column: Simple Mode
-        simple_frame = ttk.LabelFrame(main, text="🟢 Simple Mode (One-Click)", padding="10")
-        simple_frame.grid(row=3, column=0, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(0, 5))
+        # Main Layout: 2 Columns
+        # Left: Advanced Mode (Configurable)
+        # Right: Controls & Logs
         
-        ttk.Label(simple_frame, text="Hardcoded Commands:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
+        # --- LEFT COLUMN: Advanced Mode ---
+        left_wrapper = ttk.LabelFrame(main, text="🔵 Advanced Mode (Configurable)", padding="5")
+        left_wrapper.grid(row=3, column=0, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(0, 5))
         
-        simple_commands = [
-            "1. owo hunt",
-            "2. owo coinflip [1-500]",
-            "3. owo slots [1-500]",
-            "4. owo battle",
-            "5. owo cash"
-        ]
-        for cmd in simple_commands:
-            ttk.Label(simple_frame, text=cmd, font=("Courier", 9)).pack(anchor=tk.W, pady=1)
+        # Split internally into two columns (adv_col1, adv_col2)
+        adv_col1 = ttk.Frame(left_wrapper)
+        adv_col1.pack(side=tk.LEFT, fill='both', expand=True, padx=(0, 5))
         
-        ttk.Separator(simple_frame, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Separator(left_wrapper, orient='vertical').pack(side=tk.LEFT, fill='y', padx=5)
         
-        ttk.Label(simple_frame, text="Interval (seconds):").pack(anchor=tk.W)
-        interval_spin = ttk.Spinbox(
-            simple_frame,
-            from_=MIN_INTERVAL,
-            to=120,
-            textvariable=self.simple_interval,
-            width=10
-        )
-        interval_spin.pack(anchor=tk.W, pady=(0, 10))
+        adv_col2 = ttk.Frame(left_wrapper)
+        adv_col2.pack(side=tk.LEFT, fill='both', expand=True, padx=(5, 0))
+
+        # === ADV_COL1 Content ===
         
-        self.btn_start_simple = ttk.Button(
-            simple_frame,
-            text="▶ Start Simple Bot",
-            command=self._start_simple_mode,
-            width=20
-        )
-        self.btn_start_simple.pack(pady=5)
+        # Intervals
+        ttk.Label(adv_col1, text="Base Interval (seconds):").pack(anchor=tk.W)
+        ttk.Spinbox(adv_col1, from_=MIN_INTERVAL, to=120, textvariable=self.advanced_interval, width=10).pack(anchor=tk.W, pady=(0, 10))
         
-        ttk.Label(
-            simple_frame,
-            text="✓ No configuration needed\n✓ Runs 5 commands in sequence\n✓ Repeats every interval",
-            font=("Arial", 8),
-            justify=tk.LEFT,
-            foreground="gray"
-        ).pack(anchor=tk.W, pady=(10, 0))
+        ttk.Label(adv_col1, text="Refresh Interval (min):").pack(anchor=tk.W)
+        ttk.Spinbox(adv_col1, from_=5, to=120, textvariable=self.refresh_interval, width=10).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Checkbutton(adv_col1, text="Auto Refresh (Ctrl+R)", variable=self.var_auto_refresh).pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Label(adv_col1, text="Restart Interval (min):").pack(anchor=tk.W)
+        ttk.Spinbox(adv_col1, from_=10, to=240, textvariable=self.restart_interval, width=10).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Checkbutton(adv_col1, text="Auto Restart (Alt+F4)", variable=self.var_auto_restart).pack(anchor=tk.W, pady=(0, 10))
+
+        # Browser Settings
+        ttk.Label(adv_col1, text="Target Link (Browser):").pack(anchor=tk.W)
+        ttk.Entry(adv_col1, textvariable=self.target_url, width=25).pack(anchor=tk.W, pady=(0, 10))
+
+        browser_btn_frame = ttk.Frame(adv_col1)
+        browser_btn_frame.pack(anchor=tk.W, pady=(5, 5))
         
-        # Middle column: Advanced Mode
-        advanced_frame = ttk.LabelFrame(main, text="🔵 Advanced Mode (Configurable)", padding="10")
-        advanced_frame.grid(row=3, column=1, sticky=(tk.N, tk.S, tk.W, tk.E), padx=5)
+        ttk.Button(browser_btn_frame, text="Test Browser Nav", 
+                   command=lambda: threading.Thread(target=self._open_edge_and_navigate, daemon=True).start()
+        ).pack(side=tk.LEFT, padx=(0, 5))
         
-        ttk.Label(advanced_frame, text="Base Interval (seconds):").pack(anchor=tk.W)
-        ttk.Spinbox(
-            advanced_frame,
-            from_=MIN_INTERVAL,
-            to=120,
-            textvariable=self.advanced_interval,
-            width=10
-        ).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Button(browser_btn_frame, text="Stop Test", command=self._stop_browser_test).pack(side=tk.LEFT)
+
+        # Modes
+        ttk.Separator(adv_col1, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        ttk.Checkbutton(adv_col1, text="Ultra Advanced Mode", variable=self.var_ultra_mode).pack(anchor=tk.W, pady=(5, 2))
+        ttk.Checkbutton(adv_col1, text="Meme Mode", variable=self.var_meme_mode).pack(anchor=tk.W, pady=(0, 2))
+        ttk.Checkbutton(adv_col1, text="Utility Mode", variable=self.var_utility_mode).pack(anchor=tk.W, pady=(0, 10))
+
+        # === ADV_COL2 Content ===
         
-        ttk.Checkbutton(
-            advanced_frame,
-            text="Ultra Advanced Mode (action commands)",
-            variable=self.var_ultra_mode
-        ).pack(anchor=tk.W)
+        # Toggles
+        ttk.Checkbutton(adv_col2, text="Random Prefixes (owo/O)", variable=self.var_advanced_prefix).pack(anchor=tk.W)
+        ttk.Checkbutton(adv_col2, text="OwO Only (Force full)", variable=self.var_owo_only).pack(anchor=tk.W)
+        ttk.Checkbutton(adv_col2, text="Enable Random Text", variable=self.var_enable_random_text).pack(anchor=tk.W, pady=(5, 0))
+        ttk.Checkbutton(adv_col2, text="Enable 'owo sell all'", variable=self.var_enable_sell_all).pack(anchor=tk.W)
+        ttk.Checkbutton(adv_col2, text="Auto-Use Gems", variable=self.var_auto_use_gems).pack(anchor=tk.W, pady=(5, 0))
         
-        ttk.Checkbutton(
-            advanced_frame,
-            text="Meme Mode (meme generation commands)",
-            variable=self.var_meme_mode
-        ).pack(anchor=tk.W)
+        ttk.Separator(adv_col2, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         
-        ttk.Checkbutton(
-            advanced_frame,
-            text="Utility Mode (ping, stats, rules, etc.)",
-            variable=self.var_utility_mode
-        ).pack(anchor=tk.W)
+        # Gems
+        ttk.Label(adv_col2, text="Gem IDs (space-sep):").pack(anchor=tk.W)
+        ttk.Entry(adv_col2, textvariable=self.gem_ids_var, width=20).pack(anchor=tk.W, pady=(0, 5))
         
-        ttk.Checkbutton(
-            advanced_frame,
-            text="Random Prefixes (owo/o)",
-            variable=self.var_advanced_prefix
-        ).pack(anchor=tk.W)
+        ttk.Label(adv_col2, text="Use after hunts (0=expired):").pack(anchor=tk.W)
+        ttk.Spinbox(adv_col2, from_=0, to=100, textvariable=self.gem_use_threshold, width=5).pack(anchor=tk.W, pady=(0, 10))
         
-        ttk.Checkbutton(
-            advanced_frame,
-            text="OwO Only (force full 'owo' name)",
-            variable=self.var_owo_only
-        ).pack(anchor=tk.W)
+        ttk.Separator(adv_col2, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         
-        ttk.Separator(advanced_frame, orient='horizontal').pack(fill='x', pady=10)
-        
-        ttk.Label(advanced_frame, text="Typing Speed (WPM):").pack(anchor=tk.W)
+        # Typing Speed & Target
+        ttk.Label(adv_col2, text="Typing Speed (WPM):").pack(anchor=tk.W)
         wpm_scale = ttk.Scale(
-            advanced_frame,
-            from_=50,
-            to=200,
-            variable=self.typing_wpm,
-            orient=tk.HORIZONTAL,
-            length=200,
+            adv_col2, from_=50, to=200, variable=self.typing_wpm,
+            orient=tk.HORIZONTAL, length=120,
             command=lambda v: self.typing_wpm.set(int(float(v)))
         )
         wpm_scale.pack(anchor=tk.W)
-        self.wpm_label = ttk.Label(advanced_frame, text=f"{self.typing_wpm.get()} WPM", font=("Arial", 8))
+        self.wpm_label = ttk.Label(adv_col2, text=f"{self.typing_wpm.get()} WPM", font=("Arial", 8))
         self.wpm_label.pack(anchor=tk.W)
-        # Update label when WPM changes
         self.typing_wpm.trace_add('write', lambda *args: self.wpm_label.config(text=f"{self.typing_wpm.get()} WPM"))
         
-        ttk.Label(advanced_frame, text="Target User (for give/clover/cookie):").pack(anchor=tk.W, pady=(10, 0))
-        ttk.Entry(advanced_frame, textvariable=self.target_user, width=20).pack(anchor=tk.W)
+        ttk.Label(adv_col2, text="Target User:").pack(anchor=tk.W, pady=(5, 0))
+        ttk.Entry(adv_col2, textvariable=self.target_user, width=15).pack(anchor=tk.W)
+
+        # --- RIGHT COLUMN: Controls & Logs ---
+        right_panel = ttk.Frame(main)
+        right_panel.grid(row=3, column=1, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(5, 0))
+
+        # Controls Frame (Top Right)
+        control_frame = ttk.LabelFrame(right_panel, text="🎛️ Controls & Preview", padding="10")
+        control_frame.pack(fill='x', pady=(0, 10))
         
-        ttk.Separator(advanced_frame, orient='horizontal').pack(fill='x', pady=10)
-        
-        self.btn_start_advanced = ttk.Button(
-            advanced_frame,
-            text="▶ Start Advanced Bot",
-            command=self._start_advanced_mode,
-            width=20
-        )
-        self.btn_start_advanced.pack(pady=5)
-        
-        # Right column: Controls & Preview
-        control_frame = ttk.LabelFrame(main, text="🎛️ Controls & Preview", padding="10")
-        control_frame.grid(row=3, column=2, sticky=(tk.N, tk.S, tk.W, tk.E), padx=(5, 0))
-        
-        # Control buttons
+        # Buttons
         btn_container = ttk.Frame(control_frame)
         btn_container.pack(fill='x', pady=(0, 10))
         
-        self.btn_stop = ttk.Button(
-            btn_container,
-            text="⏹ Stop",
-            command=self.stop,
-            state="disabled"
-        )
-        self.btn_stop.pack(side=tk.LEFT, padx=(0, 5))
+        self.btn_start_advanced = ttk.Button(btn_container, text="▶ Start Bot", command=self._start_advanced_mode, width=12)
+        self.btn_start_advanced.pack(side=tk.LEFT, padx=(0, 2))
+
+        self.btn_stop = ttk.Button(btn_container, text="⏹ Stop", command=self.stop, state="disabled", width=12)
+        self.btn_stop.pack(side=tk.LEFT, padx=(0, 2))
         
-        self.btn_pause = ttk.Button(
-            btn_container,
-            text="⏸ Pause",
-            command=self._toggle_pause,
-            state="disabled"
-        )
-        self.btn_pause.pack(side=tk.LEFT, padx=(0, 5))
+        self.btn_pause = ttk.Button(btn_container, text="⏸ Pause", command=self._toggle_pause, state="disabled", width=10)
+        self.btn_pause.pack(side=tk.LEFT, padx=(0, 2))
         
-        ttk.Checkbutton(
-            control_frame,
-            text="🔍 Dry Run (Preview only, no typing)",
-            variable=self.var_dry_run
-        ).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Checkbutton(control_frame, text="🔍 Dry Run", variable=self.var_dry_run).pack(anchor=tk.W, pady=(0, 10))
         
-        ttk.Separator(control_frame, orient='horizontal').pack(fill='x', pady=10)
+        # Status
+        ttk.Label(control_frame, text="Status:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
+        self.status_label = ttk.Label(control_frame, text="Ready.", font=("Arial", 9), wraplength=200, justify=tk.LEFT)
+        self.status_label.pack(anchor=tk.W, fill='x', pady=(0, 5))
         
-        ttk.Label(control_frame, text="Status:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
-        self.status_label = ttk.Label(
-            control_frame,
-            text="Ready. Focus Discord before starting.",
-            font=("Arial", 9),
-            wraplength=250,
-            justify=tk.LEFT
-        )
-        self.status_label.pack(anchor=tk.W, fill='x', pady=(0, 10))
-        
-        ttk.Label(control_frame, text="Next Command Preview:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
-        self.preview_text = tk.Text(control_frame, height=8, width=30, wrap=tk.WORD, font=("Courier", 8))
-        self.preview_text.pack(fill='both', expand=True)
-        self.preview_text.insert('1.0', "Start a bot to see preview...")
+        # Next Command Preview (Shrunken)
+        ttk.Label(control_frame, text="Next Command:", font=("Arial", 9, "bold")).pack(anchor=tk.W)
+        self.preview_text = tk.Text(control_frame, height=3, width=30, wrap=tk.WORD, font=("Courier", 8))
+        self.preview_text.pack(fill='x', expand=False)
         self.preview_text.config(state='disabled')
+
+        # Recent Commands (Bottom Right)
+        log_frame = ttk.LabelFrame(right_panel, text="📜 Recent Commands", padding="5")
+        log_frame.pack(fill='both', expand=True)
         
-        # Bottom: Command log
-        log_frame = ttk.LabelFrame(main, text="📜 Recent Commands (Last 50)", padding="5")
-        log_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.N, tk.S, tk.W, tk.E), pady=(20, 0))
-        
-        self.command_log = scrolledtext.ScrolledText(log_frame, height=10, width=80, wrap=tk.WORD, font=("Courier", 8))
+        self.command_log = scrolledtext.ScrolledText(log_frame, height=10, width=40, wrap=tk.WORD, font=("Courier", 8))
         self.command_log.pack(fill='both', expand=True)
-        self.command_log.insert('1.0', "Command log will appear here...\n")
         self.command_log.config(state='disabled')
         
-        # Hotkey info
-        if KEYBOARD_AVAILABLE:
-            hotkey_info = ttk.Label(
-                main,
-                text="⌨️  Hotkey: Press Ctrl+P to toggle start/stop for current mode",
-                font=("Arial", 9),
-                foreground="blue"
-            )
-            hotkey_info.grid(row=5, column=0, columnspan=3, pady=(10, 0))
-        
-        # Configure grid weights
-        main.columnconfigure(0, weight=1)
-        main.columnconfigure(1, weight=1)
-        main.columnconfigure(2, weight=1)
+        # Configure grid weights for main window
+        main.columnconfigure(0, weight=2) # Left Col gets more space
+        main.columnconfigure(1, weight=1) # Right Col
         main.rowconfigure(3, weight=1)
-        main.rowconfigure(4, weight=0)
+        
+        # Hotkey info at bottom
+        if KEYBOARD_AVAILABLE:
+            hotkey_info = ttk.Label(main, text="⌨️ Hotkey: Ctrl+P to toggle start/stop", font=("Arial", 9), foreground="blue")
+            hotkey_info.grid(row=4, column=0, columnspan=2, pady=(5, 0))
     
     def _build_stats_tab(self, parent: ttk.Frame) -> None:
         """Build statistics display tab."""
@@ -779,14 +775,7 @@ God OwO Discord Bot - Help & Information
 MODES:
 ------
 
-1. SIMPLE MODE (One-Click)
-   • Runs 5 hardcoded commands in sequence
-   • Commands: hunt, coinflip, slots, battle, cash
-   • Repeats every interval (default 15s)
-   • No configuration needed
-   • Perfect for quick, safe automation
-
-2. ADVANCED MODE (Configurable)
+ADVANCED MODE (Configurable)
    
    Core Commands (always active):
    • hunt, coinflip, slots, battle, cash, zoo, pray
@@ -820,8 +809,15 @@ MODES:
    • Overrides Random Prefixes setting when enabled
    • Example: Always uses "owo hunt" instead of "o hunt"
    
+   🔄 BROWSER NAVIGATION
+   • Uses Microsoft Edge for Discord access
+   • Startup: Win -> Edge -> Ctrl+E -> Target URL
+   • Auto Restart: Closes Edge (Alt+F4) and re-runs startup
+   • Target URL is configurable in the UI
+   
    ⚙️ Other Settings:
    • Base interval: Time between command cycles (min 5s)
+   • Refresh interval: Time between navigation refreshes (min 5 mins)
    • Typing speed: 50-200 WPM (words per minute)
    • Target user: Username for give/clover/cookie/meme commands
    
@@ -857,9 +853,8 @@ USAGE TIPS:
 -----------
 1. Focus the Discord message box before starting
 2. Start with Dry Run mode to preview commands
-3. Use Simple Mode for basic, safe automation
-4. Monitor the logs for any errors
-5. Keep intervals reasonable (5-15s minimum recommended)
+3. Monitor the logs for any errors
+4. Keep intervals reasonable (5-15s minimum recommended)
 
 DISCORD TOS COMPLIANCE:
 -----------------------
@@ -923,9 +918,9 @@ Note: 'keyboard' requires admin/root on some systems.
             if self.worker and self.worker.is_alive():
                 self.stop()
             else:
-                # Start based on last mode or default to simple
-                if self.current_mode == "simple" or self.current_mode == "none":
-                    self._start_simple_mode()
+                # Start based on last mode or default to advanced
+                if self.current_mode == "none" or self.current_mode == "advanced":
+                    self._start_advanced_mode()
                 elif self.current_mode == "advanced":
                     self._start_advanced_mode()
         
@@ -981,47 +976,113 @@ Note: 'keyboard' requires admin/root on some systems.
         
         return result
     
-    def _start_simple_mode(self) -> None:
-        """Start the simple mode bot (5 hardcoded commands, 15s interval)."""
-        # Validate not already running
-        if self.worker and self.worker.is_alive():
-            messagebox.showwarning("Already Running", "A bot is already running. Stop it first.")
-            return
-        
-        # Show ToS warning
-        if not self._show_tos_warning():
-            return
-        
-        # Validate interval
-        if self.simple_interval.get() < MIN_INTERVAL:
-            messagebox.showerror(
-                "Invalid Interval",
-                f"Minimum interval is {MIN_INTERVAL} seconds for safety."
-            )
-            return
-        
-        # Start worker
-        self.current_mode = "simple"
-        self._stop_event.clear()
-        self._pause_event.clear()
-        self._is_paused = False
-        
-        self.stats.sessions += 1
-        self.stats.last_run = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self._save_statistics()
-        
-        self.worker = threading.Thread(target=self._run_simple_mode, daemon=True)
-        self.worker.start()
-        
-        # Update UI
-        self.btn_start_simple.config(state="disabled")
-        self.btn_start_advanced.config(state="disabled")
-        self.btn_stop.config(state="normal")
-        self.btn_pause.config(state="normal")
-        self.status_label.config(text="🟢 Simple Mode Running... Ctrl+P to stop")
-        
-        self.logger.info("Simple mode started")
-        self._log_command("[SYSTEM] Simple mode started")
+    def _stop_browser_test(self) -> None:
+        """Signal the browser test to stop."""
+        self._browser_stop_event.set()
+        self.logger.info("Browser Test Stopping...")
+
+    def _calm_sleep(self, duration: float) -> None:
+        """Sleep wrapper that checks for stop_event periodically."""
+        end_time = time.monotonic() + duration
+        while time.monotonic() < end_time:
+            if self._stop_event.is_set() or self._browser_stop_event.is_set():
+                break
+            time.sleep(0.1)
+
+    def _open_edge_and_navigate(self) -> None:
+        """Open Microsoft Edge and navigate to the target URL."""
+        try:
+            self._browser_stop_event.clear()
+            target_link = self.target_url.get().strip()
+            if not target_link:
+                self.logger.warning("No target link provided!")
+                return
+                
+            self.logger.info("Opening Edge and navigating...")
+            self._log_command("[SYSTEM] Opening Edge...")
+            
+            # Press Windows key
+            pyautogui.press('win')
+            time.sleep(1.0)
+            
+            # Type "edge"
+            pyautogui.write("edge")
+            time.sleep(1.0)
+            
+            # Press Enter to open
+            pyautogui.press('enter')
+            
+            # Wait for Edge to load
+            self.logger.info("Waiting 5s for Edge to load...")
+            self._calm_sleep(5.0)
+            
+            # Ctrl + E to focus address bar (universal trigger)
+            pyautogui.hotkey('ctrl', 'e')
+            time.sleep(1.0)
+            
+            # Press Backspace to clear query/URL
+            pyautogui.press('backspace')
+            time.sleep(0.5)
+            
+            # Type/Paste URL
+            self.logger.info(f"Navigating to: {target_link}")
+            pyautogui.write(target_link)
+            time.sleep(0.5)
+            
+            # Enter
+            pyautogui.press('enter')
+            
+            # Wait for page load (30s)
+            self.logger.info("Waiting 30s for page load...")
+            self._calm_sleep(30.0)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to open Edge: {e}")
+            self._log_command(f"[ERROR] Failed to open Edge: {e}")
+
+    def _perform_ctrl_r_refresh(self) -> None:
+        """Perform Discord refresh using Ctrl+R."""
+        try:
+            self.logger.info("Performing Ctrl+R Refresh...")
+            self._log_command("[SYSTEM] Performing Ctrl+R Refresh...")
+            
+            pyautogui.hotkey('ctrl', 'r')
+            
+            # Wait for reload (30s as requested)
+            self.logger.info("Waiting 30s for reload...")
+            self._calm_sleep(30.0)
+            
+        except Exception as e:
+            self.logger.error(f"Ctrl+R Refresh failed: {e}")
+            self._log_command(f"[ERROR] Ctrl+R Refresh failed: {e}")
+
+    def _restart_discord_sequence(self) -> None:
+        """Perform full restart sequence: Alt+F4 -> Open Edge -> Navigate."""
+        try:
+            self.logger.info("Starting Auto Restart Sequence...")
+            self._log_command("[SYSTEM] Auto Restart Sequence...")
+            
+            # 1. Close Browser/App
+            self._close_discord()
+            time.sleep(5.0)
+            
+            # 2. Open Edge and Navigate
+            self._open_edge_and_navigate()
+            
+        except Exception as e:
+            self.logger.error(f"Restart sequence failed: {e}")
+            self._log_command(f"[ERROR] Restart sequence failed: {e}")
+
+
+
+    def _close_discord(self) -> None:
+        """Close Discord using Alt+F4."""
+        try:
+            self.logger.info("Closing Discord via Alt+F4...")
+            self._log_command("[SYSTEM] Closing Discord...")
+            pyautogui.hotkey('alt', 'f4')
+        except Exception as e:
+            self.logger.error(f"Failed to close Discord: {e}")
     
     def _start_advanced_mode(self) -> None:
         """Start the advanced mode bot (configurable)."""
@@ -1048,6 +1109,10 @@ Note: 'keyboard' requires admin/root on some systems.
         self._pause_event.clear()
         self._is_paused = False
         
+        # Reset gem tracking
+        self.gem_hunt_count = 0
+        self.last_gem_use_time = 0.0
+        
         self.stats.sessions += 1
         self.stats.last_run = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         self._save_statistics()
@@ -1056,7 +1121,6 @@ Note: 'keyboard' requires admin/root on some systems.
         self.worker.start()
         
         # Update UI
-        self.btn_start_simple.config(state="disabled")
         self.btn_start_advanced.config(state="disabled")
         self.btn_stop.config(state="normal")
         self.btn_pause.config(state="normal")
@@ -1076,7 +1140,6 @@ Note: 'keyboard' requires admin/root on some systems.
                 self.logger.warning("Worker thread did not terminate cleanly")
         
         # Update UI
-        self.btn_start_simple.config(state="normal")
         self.btn_start_advanced.config(state="normal")
         self.btn_stop.config(state="disabled")
         self.btn_pause.config(state="disabled", text="⏸ Pause")
@@ -1106,83 +1169,15 @@ Note: 'keyboard' requires admin/root on some systems.
             self.logger.info("Paused")
             self._log_command("[SYSTEM] Paused")
     
-    def _run_simple_mode(self) -> None:
-        """Worker thread for simple mode: runs 5 hardcoded commands in sequence."""
-        rng = random.Random()
-        session_start = time.monotonic()
-        
-        # Hardcoded commands for simple mode
-        simple_commands = [
-            "owo hunt",
-            "owo coinflip",  # Will add random amount
-            "owo slots",     # Will add random amount
-            "owo battle",
-            "owo cash"
-        ]
-        
-        try:
-            # Initial countdown
-            for i in range(5, 0, -1):
-                if self._stop_event.is_set():
-                    return
-                self.root.after(0, lambda count=i: self.status_label.config(text=f"Starting in {count}s..."))
-                self._calm_sleep(1.0)
-            
-            while not self._stop_event.is_set():
-                # Handle pause
-                while self._pause_event.is_set() and not self._stop_event.is_set():
-                    time.sleep(0.1)
-                
-                if self._stop_event.is_set():
-                    break
-                
-                # Execute commands in sequence
-                for i, base_cmd in enumerate(simple_commands):
-                    if self._stop_event.is_set() or self._pause_event.is_set():
-                        break
-                    
-                    # Generate command with amount if needed
-                    command = self._generate_simple_command(base_cmd, rng)
-                    
-                    # Preview
-                    self._update_preview(f"Next: {command}")
-                    
-                    # Type and send (or preview if dry-run)
-                    if self.var_dry_run.get():
-                        self._log_command(f"[DRY-RUN] {command}")
-                        self.logger.info(f"[DRY-RUN] {command}")
-                    else:
-                        self._type_and_send(command, "simple", rng)
-                    
-                    # Small delay between commands
-                    if i < len(simple_commands) - 1:
-                        self._calm_sleep(1.0)
-                
-                # Wait for interval before next cycle
-                interval = self.simple_interval.get()
-                for remaining in range(interval, 0, -1):
-                    if self._stop_event.is_set() or self._pause_event.is_set():
-                        break
-                    self.root.after(0, lambda r=remaining: self.status_label.config(
-                        text=f"🟢 Next cycle in {r}s..."
-                    ))
-                    self._calm_sleep(1.0)
-        
-        except Exception as e:
-            self.logger.error(f"Error in simple mode: {e}", exc_info=True)
-            self.stats.errors += 1
-            self.root.after(0, lambda: messagebox.showerror("Error", f"An error occurred: {e}"))
-        finally:
-            runtime = int(time.monotonic() - session_start)
-            self.stats.total_runtime += runtime
-            self.logger.info(f"Simple mode ended. Runtime: {runtime}s")
-            self._save_statistics()
-            self.root.after(0, self.stop)
+
     
     def _run_advanced_mode(self) -> None:
-        """Worker thread for advanced mode: configurable command sets."""
+        """Worker thread for advanced mode: configurable command sets with anti-detection."""
         rng = random.Random()
         session_start = time.monotonic()
+        last_random_text_time = time.monotonic()
+        last_refresh_time = time.monotonic()
+        random_text_interval = rng.uniform(300, 600)  # 5-10 minutes in seconds
         
         # Build command pool based on enabled modes
         core_commands = [
@@ -1191,16 +1186,19 @@ Note: 'keyboard' requires admin/root on some systems.
             "owo slots",
             "owo battle",
             "owo cash",
-            "owo zoo",
-            "owo pray"
+            "owo zoo"
         ]
         
-        optional_commands = [
-            "owo sell all",
-            "owo daily",
-            "owo vote",
-            "owo quest"
-        ]
+        # Pray command (reduced frequency - 2 times per 5 minutes = 150s cooldown)
+        pray_command = "owo pray"
+        
+        optional_commands = []
+        if self.var_enable_sell_all.get():
+            optional_commands.append("owo sell all")
+        optional_commands.extend(["owo vote", "owo quest"])
+        
+        # Daily command (tracked separately - once per 5 minutes = 300s cooldown)
+        daily_command = "owo daily"
         
         # Ultra advanced: action commands (owo owo)
         action_commands = [
@@ -1220,7 +1218,7 @@ Note: 'keyboard' requires admin/root on some systems.
             "owo ping", "owo stats", "owo rules"
         ] if self.var_utility_mode.get() else []
         
-        # Main command pool (core + optional)
+        # Main command pool (core + optional, excluding pray and daily which are tracked separately)
         main_commands = core_commands + optional_commands
         
         try:
@@ -1231,74 +1229,202 @@ Note: 'keyboard' requires admin/root on some systems.
                 self.root.after(0, lambda count=i: self.status_label.config(text=f"Starting in {count}s..."))
                 self._calm_sleep(1.0)
             
+            # Startup Sequence: Open Edge -> Navigate
+            if not self.var_dry_run.get():
+                self.status_label.config(text="🚀 Running Startup Sequence...")
+                self._open_edge_and_navigate()
+            else:
+                self.logger.info("[DRY-RUN] Would run Startup Sequence (Edge -> Navigate)")
+                self._log_command("[DRY-RUN] Startup Sequence")
+            
             iteration = 0
             while not self._stop_event.is_set():
-                # Handle pause
-                while self._pause_event.is_set() and not self._stop_event.is_set():
-                    time.sleep(0.1)
-                
-                if self._stop_event.is_set():
-                    break
-                
-                # Pick commands for this iteration
-                # Strategy: Pick 3-5 commands from core/optional, then add 0-1 special command with 20% total chance
-                num_main_commands = rng.randint(3, 5)
-                commands_to_run = rng.sample(main_commands, min(num_main_commands, len(main_commands)))
-                
-                # 20% chance to add ONE special command (meme/utility/action)
-                # This ensures meme+utility+action combined are max ~20% of total commands
-                if rng.random() < 0.20:
-                    special_pool = []
-                    # Action commands: only 8% chance (less frequent)
-                    if action_commands and rng.random() < 0.08:
-                        special_pool.extend(action_commands)
-                    # Meme commands: 12% chance
-                    if meme_commands and rng.random() < 0.12:
-                        special_pool.extend(meme_commands)
-                    # Utility commands: 12% chance
-                    if utility_commands and rng.random() < 0.12:
-                        special_pool.extend(utility_commands)
+                try:
+                    # Handle pause
+                    while self._pause_event.is_set() and not self._stop_event.is_set():
+                        time.sleep(0.1)
                     
-                    if special_pool:
-                        special_cmd = rng.choice(special_pool)
-                        commands_to_run.append(special_cmd)
-                
-                for cmd_base in commands_to_run:
-                    if self._stop_event.is_set() or self._pause_event.is_set():
+                    if self._stop_event.is_set():
                         break
                     
-                    # Generate final command
-                    command = self._generate_advanced_command(cmd_base, rng)
+                    current_time = time.monotonic()
                     
-                    # Preview
-                    self._update_preview(f"Next: {command}")
+                    # 1. Check Auto Restart (Alt+F4) - Every 30 mins
+                    restart_interval_sec = self.restart_interval.get() * 60
+                    if self.var_auto_restart.get() and (current_time - session_start) >= restart_interval_sec:
+                        # Reset session start to restart timer
+                        session_start = current_time
+                        
+                        if not self.var_dry_run.get():
+                            self.status_label.config(text="🔄 Performing Auto Restart...")
+                            self._restart_discord_sequence()
+                            # Reset other timers to avoid immediate trigger
+                            last_refresh_time = time.monotonic()
+                            last_random_text_time = time.monotonic()
+                        else:
+                            self.logger.info("[DRY-RUN] Would perform Auto Restart (Alt+F4)")
+                            self._log_command("[DRY-RUN] Auto Restart")
+                        
+                        continue  # Skip rest of loop to start fresh
                     
-                    # Type and send (or preview if dry-run)
-                    if self.var_dry_run.get():
-                        self._log_command(f"[DRY-RUN] {command}")
-                        self.logger.info(f"[DRY-RUN] {command}")
-                    else:
-                        self._type_and_send(command, "advanced", rng)
+                    # 2. Check Auto Refresh (Ctrl+R) - Every 10 mins
+                    refresh_interval_sec = self.refresh_interval.get() * 60
+                    if self.var_auto_refresh.get() and (current_time - last_refresh_time) >= refresh_interval_sec:
+                        if not self.var_dry_run.get():
+                            self.status_label.config(text="🔄 Performing Auto Refresh...")
+                            self._perform_ctrl_r_refresh()
+                        else:
+                            self.logger.info("[DRY-RUN] Would perform Auto Refresh (Ctrl+R)")
+                            self._log_command("[DRY-RUN] Auto Refresh")
+                        
+                        last_refresh_time = time.monotonic()
+                        continue  # Skip rest of loop to let things settle
                     
-                    # Small delay between commands
-                    self._calm_sleep(rng.uniform(1.0, 2.0))
+                    # 3. Check Random Text (every 5-10 minutes)
+                    if self.var_enable_random_text.get() and (current_time - last_random_text_time) >= random_text_interval:
+                        self._send_random_text(rng)
+                        last_random_text_time = current_time
+                        random_text_interval = rng.uniform(300, 600)  # Reset interval
+                        self._calm_sleep(rng.uniform(2.0, 4.0))
+                    
+                    # 4. Regular Command Logic
+                    
+                    # Pick commands for this iteration with cooldown checking
+                    commands_to_run = []
+                    
+                    # Pick 3-5 commands from main pool (with cooldown check)
+                    available_main = [cmd for cmd in main_commands if self._can_use_command(cmd, 10.0)]  # 10s base cooldown
+                    if available_main:
+                        num_main = rng.randint(3, min(5, len(available_main)))
+                        commands_to_run.extend(rng.sample(available_main, num_main))
+                    
+                    # Check pray command (2 times per 5 minutes = 150s cooldown)
+                    if self._can_use_command(pray_command, 150.0):
+                        if rng.random() < 0.4:  # 40% chance when available
+                            commands_to_run.append(pray_command)
+                    
+                    # Check daily command (once per 5 minutes = 300s cooldown)
+                    if self._can_use_command(daily_command, 300.0):
+                        if rng.random() < 0.3:  # 30% chance when available
+                            commands_to_run.append(daily_command)
+                    
+                    # 20% chance to add ONE special command (meme/utility/action)
+                    if rng.random() < 0.20:
+                        special_pool = []
+                        # Action commands: only 8% chance (less frequent)
+                        if action_commands and rng.random() < 0.08:
+                            available_actions = [cmd for cmd in action_commands if self._can_use_command(cmd, 30.0)]
+                            if available_actions:
+                                special_pool.extend(available_actions)
+                        # Meme commands: 12% chance
+                        if meme_commands and rng.random() < 0.12:
+                            available_memes = [cmd for cmd in meme_commands if self._can_use_command(cmd, 30.0)]
+                            if available_memes:
+                                special_pool.extend(available_memes)
+                        # Utility commands: 12% chance
+                        if utility_commands and rng.random() < 0.12:
+                            available_utils = [cmd for cmd in utility_commands if self._can_use_command(cmd, 30.0)]
+                            if available_utils:
+                                special_pool.extend(available_utils)
+                        
+                        if special_pool:
+                            special_cmd = rng.choice(special_pool)
+                            commands_to_run.append(special_cmd)
+                    
+                    # Shuffle commands for more natural order
+                    rng.shuffle(commands_to_run)
+                    
+                    # Execute commands
+                    for cmd_base in commands_to_run:
+                        if self._stop_event.is_set() or self._pause_event.is_set():
+                            break
+                        
+                        # Generate final command
+                        command = self._generate_advanced_command(cmd_base, rng)
+                        
+                        # Mark command as used (for cooldown tracking)
+                        self._mark_command_used(cmd_base)
+                        
+                        # Track hunt count for gem auto-use
+                        if "hunt" in cmd_base.lower():
+                            self.gem_hunt_count += 1
+                        
+                        # Preview
+                        self._update_preview(f"Next: {command}")
+                        
+                        # Type and send (or preview if dry-run)
+                        if self.var_dry_run.get():
+                            self._log_command(f"[DRY-RUN] {command}")
+                            self.logger.info(f"[DRY-RUN] {command}")
+                        else:
+                            self._type_and_send(command, "advanced", rng)
+                        
+                        # Small delay between commands
+                        self._calm_sleep(rng.uniform(1.0, 2.0))
+                    
+                    # Check if we should auto-use gems
+                    if self.var_auto_use_gems.get() and not self.var_dry_run.get():
+                        should_use_gems = False
+                        hunt_interval = self.gem_hunt_interval.get() if self.gem_hunt_interval else 0
+                        
+                        # Use gems if:
+                        # 1. Hunt interval is set (>0) and we've reached that many hunts
+                        # 2. Or hunt interval is 0 (only when expired - we'll use after every hunt cycle)
+                        if hunt_interval > 0 and self.gem_hunt_count >= hunt_interval:
+                            should_use_gems = True
+                            self.gem_hunt_count = 0  # Reset counter
+                        elif hunt_interval == 0 and self.gem_hunt_count > 0:
+                            # For "expired only" mode, use after every few hunts as a check
+                            # (In real scenario, you'd need to parse bot response to know when expired)
+                            if self.gem_hunt_count >= 20:  # Check every 20 hunts
+                                should_use_gems = True
+                                self.gem_hunt_count = 0
+                        
+                        if should_use_gems:
+                            gem_ids_str = self.gem_ids_entry.get() if self.gem_ids_entry else "51 65 72"
+                            gem_ids = [gid.strip() for gid in gem_ids_str.split() if gid.strip().isdigit()]
+                            
+                            if gem_ids:
+                                gem_command = f"owo use {' '.join(gem_ids)}"
+                                self._update_preview(f"Next: {gem_command} (Auto-Use Gems)")
+                                
+                                if self.var_dry_run.get():
+                                    self._log_command(f"[DRY-RUN] {gem_command}")
+                                    self.logger.info(f"[DRY-RUN] {gem_command}")
+                                else:
+                                    self._type_and_send(gem_command, "advanced", rng)
+                                    self.logger.info(f"[GEM AUTO-USE] Used gems: {gem_ids}")
+                                    self._log_command(f"[GEM AUTO-USE] {gem_command}")
+                                
+                                self._calm_sleep(rng.uniform(1.5, 2.5))
+                    
+                    # Wait for interval
+                    interval = self.advanced_interval.get()
+                    for remaining in range(interval, 0, -1):
+                        if self._stop_event.is_set() or self._pause_event.is_set():
+                            break
+                        # Calculate cooldown times
+                        now = time.monotonic()
+                        pray_cooldown = max(0, 150 - (now - self.command_last_used.get(pray_command, 0)))
+                        daily_cooldown = max(0, 300 - (now - self.command_last_used.get(daily_command, 0)))
+                        pray_min = int(pray_cooldown / 60)
+                        daily_min = int(daily_cooldown / 60)
+                        status_msg = f"🔵 Next iteration in {remaining}s... | Pray: {pray_min}m | Daily: {daily_min}m"
+                        self.root.after(0, lambda msg=status_msg: self.status_label.config(text=msg))
+                        self._calm_sleep(1.0)
+                    
+                    iteration += 1
                 
-                # Wait for interval
-                interval = self.advanced_interval.get()
-                for remaining in range(interval, 0, -1):
-                    if self._stop_event.is_set() or self._pause_event.is_set():
-                        break
-                    self.root.after(0, lambda r=remaining: self.status_label.config(
-                        text=f"🔵 Next iteration in {r}s..."
-                    ))
-                    self._calm_sleep(1.0)
-                
-                iteration += 1
+                except Exception as loop_error:
+                    self.logger.error(f"Error in main loop iteration: {loop_error}", exc_info=True)
+                    self._log_command(f"[ERROR] Loop error: {loop_error}")
+                    # Wait a bit before retrying to avoid spamming errors
+                    self._calm_sleep(5.0)
         
         except Exception as e:
-            self.logger.error(f"Error in advanced mode: {e}", exc_info=True)
+            self.logger.error(f"Fatal error in advanced mode: {e}", exc_info=True)
             self.stats.errors += 1
-            self.root.after(0, lambda: messagebox.showerror("Error", f"An error occurred: {e}"))
+            self.root.after(0, lambda: messagebox.showerror("Error", f"A fatal error occurred: {e}"))
         finally:
             runtime = int(time.monotonic() - session_start)
             self.stats.total_runtime += runtime
@@ -1306,24 +1432,75 @@ Note: 'keyboard' requires admin/root on some systems.
             self._save_statistics()
             self.root.after(0, self.stop)
     
-    def _generate_simple_command(self, base_cmd: str, rng: random.Random) -> str:
-        """Generate a command for simple mode with random amounts.
+    def _can_use_command(self, command: str, cooldown_seconds: float) -> bool:
+        """Check if a command can be used based on cooldown.
         
         Args:
-            base_cmd: Base command string
-            rng: Random number generator
+            command: Command to check
+            cooldown_seconds: Required seconds since last use
             
         Returns:
-            Final command string with amounts if applicable
+            True if command can be used, False otherwise
         """
-        if base_cmd == "owo coinflip":
-            amount = self._generate_unique_amount("coinflip", 1, 500, rng)
-            return f"owo coinflip {amount}"
-        elif base_cmd == "owo slots":
-            amount = self._generate_unique_amount("slots", 1, 500, rng)
-            return f"owo slots {amount}"
-        else:
-            return base_cmd
+        now = time.monotonic()
+        last_used = self.command_last_used.get(command, 0)
+        return (now - last_used) >= cooldown_seconds
+    
+    def _mark_command_used(self, command: str) -> None:
+        """Mark a command as used (update timestamp)."""
+        self.command_last_used[command] = time.monotonic()
+    
+    def _generate_random_text(self, rng: random.Random, num_sentences: int = None) -> str:
+        """Generate random nonsense text with longer sentences.
+        
+        Args:
+            rng: Random number generator
+            num_sentences: Number of sentences (default: 20-30)
+            
+        Returns:
+            Random text string
+        """
+        if num_sentences is None:
+            num_sentences = rng.randint(20, 30)
+        
+        sentences = []
+        for _ in range(num_sentences):
+            # Prefer longer sentences (4-5 words) as requested
+            sentence_length = rng.choices(
+                [1, 2, 3, 4, 5],
+                weights=[5, 10, 15, 40, 30]  # Higher weight for 4-5 word sentences
+            )[0]
+            
+            # Sample words without replacement to avoid duplicates in same sentence
+            available_words = [w for w in self.random_texts if len(w.split()) <= 2]  # Use shorter phrases
+            if len(available_words) < sentence_length:
+                available_words = self.random_texts  # Fallback to all if needed
+            
+            words = rng.sample(available_words, min(sentence_length, len(available_words)))
+            sentence = ' '.join(words)
+            
+            # Random capitalization (first letter)
+            if rng.random() < 0.3:
+                sentence = sentence.capitalize()
+            
+            # Add punctuation randomly
+            if rng.random() < 0.2:
+                sentence += rng.choice(['!', '?', '.', '...'])
+            
+            sentences.append(sentence)
+        
+        return ' '.join(sentences)
+    
+    def _send_random_text(self, rng: random.Random) -> None:
+        """Send random text message."""
+        if not self.var_enable_random_text.get():
+            return
+        
+        random_text = self._generate_random_text(rng)
+        self._type_and_send(random_text, "advanced", rng, is_random_text=True)
+        self.logger.info(f"[RANDOM TEXT] Sent {len(random_text.split())} words")
+    
+
     
     def _generate_advanced_command(self, base_cmd: str, rng: random.Random) -> str:
         """Generate a command for advanced mode with random amounts and prefixes.
@@ -1380,13 +1557,14 @@ Note: 'keyboard' requires admin/root on some systems.
         self.previous_amounts[key] = amount
         return amount
     
-    def _type_and_send(self, command: str, mode: str, rng: random.Random) -> None:
+    def _type_and_send(self, command: str, mode: str, rng: random.Random, is_random_text: bool = False) -> None:
         """Type a command with human-like timing and send it.
         
         Args:
             command: The command to type
             mode: The mode ("simple" or "advanced")
             rng: Random number generator
+            is_random_text: Whether this is random text (not tracked as command)
         """
         if self._stop_event.is_set() or self._pause_event.is_set():
             return
@@ -1409,22 +1587,30 @@ Note: 'keyboard' requires admin/root on some systems.
             if not self._stop_event.is_set() and not self._pause_event.is_set():
                 pyautogui.press('enter')
                 
-                # Update stats
-                self.stats.commands_sent += 1
-                cmd_type = mode
-                self.stats.commands_by_type[cmd_type] = self.stats.commands_by_type.get(cmd_type, 0) + 1
+                # Update stats (only for actual commands, not random text)
+                if not is_random_text:
+                    self.stats.commands_sent += 1
+                    cmd_type = mode
+                    self.stats.commands_by_type[cmd_type] = self.stats.commands_by_type.get(cmd_type, 0) + 1
                 
                 # Log
-                self.logger.info(f"Sent: {command}")
-                self._log_command(f"[{mode.upper()}] {command}")
+                if is_random_text:
+                    self.logger.info(f"[RANDOM TEXT] Sent: {command[:50]}...")
+                    self._log_command(f"[RANDOM TEXT] {command[:50]}...")
+                else:
+                    self.logger.info(f"Sent: {command}")
+                    self._log_command(f"[{mode.upper()}] {command}")
                 
                 # Update status
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"✓ Sent: {command[:40]}... | Total: {self.stats.commands_sent}"
-                ))
+                cmd_preview = command[:40] + "..." if len(command) > 40 else command
+                status_text = f"✓ Sent: {cmd_preview} | Total: {self.stats.commands_sent}"
+                self.root.after(0, lambda txt=status_text: self.status_label.config(text=txt))
                 
-                # Variable post-send delay
-                self._calm_sleep(rng.uniform(0.8, 1.5))
+                # Variable post-send delay (longer for random text to seem more natural)
+                if is_random_text:
+                    self._calm_sleep(rng.uniform(2.0, 4.0))
+                else:
+                    self._calm_sleep(rng.uniform(0.8, 1.5))
         
         except Exception as e:
             self.logger.error(f"Error typing command '{command}': {e}")
@@ -1610,48 +1796,7 @@ def run_self_tests() -> bool:
         print(f"  ✗ FAILED: {e}")
         failed += 1
     
-    # Test 2: Simple command generation
-    print("\nTest 2: Simple command generation...")
-    try:
-        # Mock minimal app for command generation
-        class MockApp:
-            def __init__(self):
-                self.previous_amounts = {}
-            
-            def _generate_unique_amount(self, key, min_val, max_val, rng, max_retries=10):
-                amount = rng.randint(min_val, max_val)
-                retries = 0
-                while amount == self.previous_amounts.get(key, -1) and retries < max_retries:
-                    amount = rng.randint(min_val, max_val)
-                    retries += 1
-                self.previous_amounts[key] = amount
-                return amount
-            
-            def _generate_simple_command(self, base_cmd, rng):
-                if base_cmd == "owo coinflip":
-                    amount = self._generate_unique_amount("coinflip", 1, 500, rng)
-                    return f"owo coinflip {amount}"
-                elif base_cmd == "owo slots":
-                    amount = self._generate_unique_amount("slots", 1, 500, rng)
-                    return f"owo slots {amount}"
-                else:
-                    return base_cmd
-        
-        mock_app = MockApp()
-        rng = random.Random(42)
-        
-        cmd1 = mock_app._generate_simple_command("owo hunt", rng)
-        assert cmd1 == "owo hunt", f"Expected 'owo hunt', got '{cmd1}'"
-        
-        cmd2 = mock_app._generate_simple_command("owo coinflip", rng)
-        assert cmd2.startswith("owo coinflip "), f"Expected 'owo coinflip N', got '{cmd2}'"
-        assert cmd2.split()[-1].isdigit(), f"Expected numeric amount, got '{cmd2}'"
-        
-        print(f"  ✓ Commands generated correctly: {cmd1}, {cmd2}")
-        passed += 1
-    except AssertionError as e:
-        print(f"  ✗ FAILED: {e}")
-        failed += 1
+
     
     # Test 3: Stats dataclass
     print("\nTest 3: BotStats serialization...")
