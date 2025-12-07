@@ -40,26 +40,75 @@ A simple Python program that automatically types text in Discord at 100 words pe
 
 5. Use "Repeat" to restart the content when finished
 
-## OwO Auto Typer (new)
+## OwO Auto Typer
 
-An additional utility is provided to automatically send OwO bot commands at a fixed interval.
+Three versions available with increasing features:
 
-### Run
+### 1. Original Version (`owo_autotyper.py`)
+Basic functionality with simple command automation.
+
+### 2. Refactored Version (`owo_autotyper_refactored.py`)
+Improved scheduling, cleaner code, better UI.
+
+### 3. **Enhanced Version (`owo_autotyper_enhanced.py`)** ⭐ RECOMMENDED
+Production-ready with extensive features.
+
+### Run Enhanced Version
 
 ```bash
-python owo_autotyper.py
+python owo_autotyper_enhanced.py
 ```
 
-### Features
-- Select categories: Economy, Animals/Hunt, Gambling
-- Default interval 15 seconds (configurable 5–120s)
-- Random command selection each interval
-- Sends command and presses Enter automatically
-- Start/Stop controls with global hotkey Ctrl+P to stop
+### Enhanced Features ✨
+- **Bug Fixes**: All critical bugs from previous versions fixed
+- **Configuration System**: Save/load settings as JSON profiles
+- **Statistics Dashboard**: Track commands sent, runtime, success rates
+- **Pause/Resume**: Pause without losing progress (Ctrl+Space)
+- **Cooldown Tracking**: Live countdown display for pray, daily, hunt, battle
+- **Focus Detection**: Auto-pause when Discord loses focus (Windows/Linux)
+- **Comprehensive Logging**: File logging with export functionality
+- **Human-like Behavior**: 
+  - Typing speed variance (±20%)
+  - Random typos with corrections (5% chance)
+  - Random pauses (2% chance)
+  - Anti-pattern randomization
+- **Advanced UI**: Tabbed interface with Statistics, Settings, and Logs
+- **Error Handling**: Robust error recovery and reporting
+- **Multiple Modes**:
+  - Minute Plan: 4 hunt, 5 cf, 3 slots, 2 bj per minute
+  - Cash Farm: Hunt → Sell cycle with optional coinflips
+  - Per-Command: Individual scheduling for each command type
+- **Safety Features**:
+  - Maximum 24-hour runtime limit
+  - Minimum 3-second interval enforcement
+  - Focus validation before typing
+  - Emergency stop mechanisms
+  - Clean shutdown handling
+
+### Hotkeys
+- **Ctrl+P**: Toggle Start/Stop
+- **Ctrl+Space**: Toggle Pause/Resume (when running)
 
 ### Tips
 - Open Discord and focus the desired channel before starting
-- Keep the interval reasonable to avoid spam limits
+- Keep intervals reasonable to avoid rate limits
+- Use pause/resume for temporary breaks
+- Check logs tab for debugging information
+- Export statistics to track your usage patterns
+- Save your favorite configurations for quick loading
+
+### Configuration Files
+All data stored in `~/.owo_autotyper/`:
+- `config.json` - Your settings
+- `statistics.json` - Usage statistics
+- `autotyper.log` - Application logs
+
+### Optional Dependencies
+For enhanced focus detection:
+- **Windows**: `pip install pywin32`
+- **Linux**: Install `xdotool` package
+
+See `IMPROVEMENTS.md` for complete feature documentation.
 
 ## Controls
 

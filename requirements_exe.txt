@@ -1,0 +1,13 @@
+# Requirements for building God_owo_discordbot.exe
+# Install these before running build_exe.py
+
+pyinstaller>=5.13.0
+pyautogui>=0.9.54
+keyboard>=0.13.5
+Pillow>=9.5.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+pygetwindow>=0.0.9
+pyperclip>=1.8.2
+pyscreeze>=0.1.29
+
